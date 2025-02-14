@@ -24,7 +24,7 @@ class Pizza{
 class PizzaStore {
 	public:
 		Pizza* pizzaOrder(string type){
-            auto pizza = createPizza(type);
+            Pizza* pizza = createPizza(type);
             pizza->prepare();
             pizza->bake();
             pizza->cut();
