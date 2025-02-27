@@ -15,8 +15,8 @@ public:
     Post* post;
     time_t createdAt;
     Comment(string content, User* author, Post* post) {
-        this->author = author;
         this->content = content;
+        this->author = author;
         this->post = post;
         this->createdAt = time(0);
     }
@@ -27,6 +27,21 @@ public:
         return string(buffer);
     }
 };
+
+class User {
+public:
+    string name;
+    string email;
+    int reputation;
+    User(string name, string email) {
+        this->name = name;
+        this->email = email;
+        this->reputation = 0; // Change: Initialize reputation
+    }
+
+    void updateReputation(int points) { reputation += points; }
+};
+
 
 class Post {
 public:
@@ -45,7 +60,7 @@ public:
         this->createdAt = time(0);
     }
     
-    virtual ~Post() {} // Change: Added virtual destructor for proper cleanup
+    virtual ~Post() {}
 
     string getDate() {
         char buffer[80];
@@ -54,34 +69,25 @@ public:
         return string(buffer);
     }
     
-    // Change: Updated upVote to update reputation (assumed +10 for an upvote)
-    void upVote(User* user);
-    
-    // Change: Updated downVote to update reputation (assumed -2 for a downvote)
-    void downVote(User* user);
-    
-    // Change: Removed console output from getUpVotes and getDownVotes for better design
-    int getUpVotes() {
-        return upVotes.size();
+    void upVote(User* user) {
+        if (upVotes.find(user) == upVotes.end()) {
+            upVotes.emplace(user);
+            downVotes.erase(user);
+            author->updateReputation(10);
+        }
     }
-    int getDownVotes() {
-        return downVotes.size();
+    
+    void downVote(User* user) {
+        if (downVotes.find(user) == downVotes.end()) {
+            downVotes.emplace(user);
+            upVotes.erase(user);
+            author->updateReputation(-2);
+        }
     }
-};
+    
+    int getUpVotes() { return upVotes.size(); }
 
-class User {
-public:
-    string name;
-    string email;
-    int reputation;
-    User(string name, string email) {
-        this->name = name;
-        this->email = email;
-        this->reputation = 0; // Change: Initialize reputation
-    }
-    void updateReputation(int points) {
-        reputation += points;
-    }
+    int getDownVotes() { return downVotes.size(); }
 };
 
 class Question : public Post {
@@ -105,28 +111,6 @@ public:
     }
 };
 
-// Change: Implementation of upVote and downVote with reputation update
-void Post::upVote(User* user) {
-    if (upVotes.find(user) == upVotes.end()) { // Avoid duplicate upvotes
-        upVotes.emplace(user);
-        downVotes.erase(user);
-        // Change: Update the post's author's reputation (assumed +10)
-        author->updateReputation(10);
-    }
-}
-
-void Post::downVote(User* user) {
-    if (downVotes.find(user) == downVotes.end()) { // Avoid duplicate downvotes
-        downVotes.emplace(user);
-        upVotes.erase(user);
-        // Change: Update the post's author's reputation (assumed -2)
-        author->updateReputation(-2);
-    }
-}
-
-
-
-// Change: Updated SearchStrategy interface with corrected method name "search"
 class SearchStrategy {
 public:
     virtual vector<int> search(const string& searchParameter, const unordered_set<Question*>& questions) = 0;
@@ -173,14 +157,42 @@ public:
 
     void postAnswer(string content, User* author, int questionId) {
         int nextId = getId();
-        // Change: Check if the question exists before posting an answer
         if (idMap.find(questionId) == idMap.end()) {
             cout << "Question with ID " << questionId << " does not exist." << endl;
             return;
         }
         Answer* answer = new Answer(nextId, content, author, idMap[questionId]);
-        // Change: Add the answer to the question's answers vector
         idMap[questionId]->answers.push_back(answer);
+    }
+    
+    void postCommentOnQuestion(int questionId, string content, User* author) {
+        if (idMap.find(questionId) == idMap.end()) {
+            cout << "Question with ID " << questionId << " not found." << endl;
+            return;
+        }
+        Comment* comment = new Comment(content, author, idMap[questionId]);
+        idMap[questionId]->comments.push_back(comment);
+    }
+    
+    void postCommentOnAnswer(int questionId, int answerId, string content, User* author) {
+        if (idMap.find(questionId) == idMap.end()) {
+            cout << "Question with ID " << questionId << " not found." << endl;
+            return;
+        }
+        Question* q = idMap[questionId];
+        Answer* foundAnswer = nullptr;
+        for (auto ans : q->answers) {
+            if (ans->id == answerId) {
+                foundAnswer = ans;
+                break;
+            }
+        }
+        if (foundAnswer == nullptr) {
+            cout << "Answer with ID " << answerId << " not found." << endl;
+            return;
+        }
+        Comment* comment = new Comment(content, author, foundAnswer);
+        foundAnswer->comments.push_back(comment);
     }
 
     void removeQuestion(int id) {
@@ -207,10 +219,27 @@ public:
             cout << tag << " ";
         cout << "\nUpVotes: " << question->getUpVotes() << " DownVotes: " << question->getDownVotes() << "\n";
         cout << "Posted at: " << question->getDate() << "\n";
+        
+        // Change: Display comments on the question
+        if (!question->comments.empty()) {
+            cout << "Question Comments:\n";
+            for (auto comm : question->comments) {
+                cout << "\t" << comm->author->name << " commented: " 
+                     << comm->content << " at " << comm->getDate() << "\n";
+            }
+        }
+        
         cout << "Answers:\n";
         for (auto &ans : question->answers) {
             cout << "\t" << ans->content << " by " << ans->author->name 
                  << " [UpVotes: " << ans->getUpVotes() << " DownVotes: " << ans->getDownVotes() << "]\n";
+            if (!ans->comments.empty()) {
+                cout << "\t Answer Comments:\n";
+                for (auto comm : ans->comments) {
+                    cout << "\t\t" << comm->author->name << " commented: " 
+                         << comm->content << " at " << comm->getDate() << "\n";
+                }
+            }
         }
         cout << "\n";
     }
@@ -226,33 +255,27 @@ public:
     }
 };
 
-int StackOverflow::id = 1; // Change: Initialize static id
+int StackOverflow::id = 1;
 
 int main() {
     User* dhaval = new User("Dhaval", "dhaval@gmail.com");
     User* taylor = new User("taylor", "taylor@gmail.com");
     StackOverflow* st = new StackOverflow();
 
-    st->postQuestion("This is question 1 by dhaval", "Q1 Dhaval", dhaval, {"Question1", "Q1"});
-    st->postQuestion("This is question 2 by dhaval", "Q2 Dhaval", dhaval, {"Question2", "Q2"});
+    st->postQuestion("This is question 1 by Dhaval", "Q1 Dhaval", dhaval, {"Question1", "Q1"});
+    st->postQuestion("This is question 2 by Dhaval", "Q2 Dhaval", dhaval, {"Question2", "Q2"});
     st->postAnswer("Answer1", taylor, 1);
     
-    // Example: Upvoting and downvoting
     st->idMap[1]->upVote(taylor); // Taylor upvotes question 1
     if (!st->idMap[1]->answers.empty()) {
         st->idMap[1]->answers[0]->downVote(dhaval); // Dhaval downvotes the answer
     }
     
-    st->displayAllQuestions();
-
-    // Example: Searching
-    SearchByTag searchTag;
-    cout << "Search results for tag 'Q1':\n";
-    st->findQuestion("Q1", &searchTag);
+    st->postCommentOnQuestion(1, "This is a comment on question 1 by Taylor", taylor);
+    int answerId = st->idMap[1]->answers[0]->id;
+    st->postCommentOnAnswer(1, answerId, "This is a comment on the answer by Dhaval", dhaval);
     
-    SearchByUser searchUser;
-    cout << "Search results for user 'Dhaval':\n";
-    st->findQuestion("Dhaval", &searchUser);
+    st->displayAllQuestions();
 
     return 0;
 }
